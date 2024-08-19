@@ -4,6 +4,7 @@ import pyodbc
 from fastapi import HTTPException
 from dotenv import load_dotenv
 from typing import Optional
+
 import os
 
 load_dotenv()
@@ -39,11 +40,8 @@ def fetch_products_and_bundles(
         params = []
 
         if category:
-            filter_clauses.append("cat.CategoriaID = ?")
+            filter_clauses.append("cat.Nombre = ?")
             params.append(category)
-        if size:
-            filter_clauses.append("t.Nombre = ?")
-            params.append(size)
         if brand:
             filter_clauses.append("m.Nombre = ?")
             params.append(brand)
@@ -51,11 +49,22 @@ def fetch_products_and_bundles(
             filter_clauses.append("c.Nombre = ?")
             params.append(color)
 
+        if size:
+            filter_clauses.append("t.Nombre = ?")
+            params.append(size)
+            join_talla = """
+            INNER JOIN ProductoTallas pt ON p.ProductoID = pt.ProductoID
+            INNER JOIN Tallas t ON pt.TallaID = t.TallaID
+            """
+        else:
+            join_talla = ""
+
+        # Solo aplicar la cláusula WHERE si hay filtros
         filter_sql = " AND ".join(filter_clauses)
-        if filter_sql:
+        if filter_clauses:
             filter_sql = "WHERE " + filter_sql
 
-        # Obtener productos con todos los datos
+        # Obtener productos con todos los datos, pero solo aquellos que tienen la talla filtrada
         cursor.execute(f"""
             SELECT
                 p.ProductoID,
@@ -68,15 +77,17 @@ def fetch_products_and_bundles(
             FROM Productos p
             INNER JOIN Inventarios i ON p.ProductoID = i.ProductoID
             LEFT JOIN Marcas m ON p.MarcaID = m.MarcaID
-            LEFT JOIN Colores c ON p.ColorID = c.ColorID
-            LEFT JOIN ProductosCategorias pc ON p.ProductoID = pc.ProductoID
-            LEFT JOIN Categorias cat ON pc.CategoriaID = cat.CategoriaID
+            LEFT JOIN ProductoColores pc ON p.ProductoID = pc.ProductoID
+            LEFT JOIN Colores c ON pc.ColorID = c.ColorID
+            LEFT JOIN ProductosCategorias pcg ON p.ProductoID = pcg.ProductoID
+            LEFT JOIN Categorias cat ON pcg.CategoriaID = cat.CategoriaID
+            {join_talla}
             {filter_sql}
         """, params)
 
         productos = cursor.fetchall()
 
-        # Crear un diccionario para agrupar las tallas por producto
+        # Crear un diccionario para agrupar las tallas y colores por producto
         productos_dict = {}
         for row in productos:
             producto_id = row[0]
@@ -86,33 +97,36 @@ def fetch_products_and_bundles(
                     'NombreProducto': row[1],
                     'Stock': row[2],
                     'Img': row[3],
-                    'Tallas': [],  # Inicializamos una lista vacía para las tallas
-                    'NombreColor': row[4],
+                    'Tallas': [],
+                    'Colores': [row[4]],
                     'NombreMarca': row[5],
                     'Precio': row[6]
                 }
+            else:
+                productos_dict[producto_id]['Colores'].append(row[4])
 
-        # Obtener todas las tallas asociadas a cada producto
-        cursor.execute("""
-            SELECT
-                p.ProductoID,
-                t.Nombre AS NombreTalla
-            FROM ProductoTallas pt
-            INNER JOIN Productos p ON pt.ProductoID = p.ProductoID
-            INNER JOIN Tallas t ON pt.TallaID = t.TallaID
-        """)
-        tallas = cursor.fetchall()
-        for row in tallas:
-            producto_id = row[0]
-            talla_nombre = row[1]
-            if producto_id in productos_dict:
-                productos_dict[producto_id]['Tallas'].append(talla_nombre)
-
-        # Convertir el diccionario a una lista
+        # Obtener todas las tallas asociadas a cada producto, si no se ha filtrado por talla
+        if not size:
+            cursor.execute("""
+                SELECT
+                    p.ProductoID,
+                    t.Nombre AS NombreTalla
+                FROM ProductoTallas pt
+                INNER JOIN Productos p ON pt.ProductoID = p.ProductoID
+                INNER JOIN Tallas t ON pt.TallaID = t.TallaID
+            """)
+            
+            tallas = cursor.fetchall()
+            for row in tallas:
+                producto_id = row[0]
+                talla_nombre = row[1]
+                if producto_id in productos_dict:
+                    productos_dict[producto_id]['Tallas'].append(talla_nombre)
+        
         productos_list = list(productos_dict.values())
 
-        # Obtener bundles
-        cursor.execute("""
+        # Obtener bundles que contienen productos que cumplen con los filtros
+        cursor.execute(f"""
             SELECT
                 b.BundleID,
                 b.Nombre AS NombreBundle,
@@ -121,25 +135,66 @@ def fetch_products_and_bundles(
             FROM Bundles b
             INNER JOIN BundleDetalles bd ON b.BundleID = bd.BundleID
             INNER JOIN Inventarios i ON bd.ProductoID = i.ProductoID
+            INNER JOIN Productos p ON bd.ProductoID = p.ProductoID
+            LEFT JOIN Marcas m ON p.MarcaID = m.MarcaID
+            LEFT JOIN ProductoColores pc ON p.ProductoID = pc.ProductoID
+            LEFT JOIN Colores c ON pc.ColorID = c.ColorID
+            LEFT JOIN ProductosCategorias pcg ON p.ProductoID = pcg.ProductoID
+            LEFT JOIN Categorias cat ON pcg.CategoriaID = cat.CategoriaID
+            LEFT JOIN ProductoTallas pt ON p.ProductoID = pt.ProductoID
+            LEFT JOIN Tallas t ON pt.TallaID = t.TallaID
+            {filter_sql}
             GROUP BY b.BundleID, b.Nombre, b.Descripcion
-        """)
+        """, params)
         bundles = cursor.fetchall()
-        bundles_list = [dict(zip([column[0] for column in cursor.description], row)) for row in bundles]
+        bundles_dict = {}
+        for row in bundles:
+            bundle_id = row[0]
+            bundles_dict[bundle_id] = {
+                'BundleID': row[0],
+                'NombreBundle': row[1],
+                'DescripcionBundle': row[2],
+                'PrecioTotalBundle': 0.0,  # Inicializar el precio total
+                'Productos': []
+            }
+
+        # Obtener los detalles de los productos en los bundles y calcular el precio total
+        cursor.execute("""
+            SELECT
+                bd.BundleID,
+                p.ProductoID,
+                p.Nombre AS NombreProducto,
+                bd.Cantidad,
+                i.Precio
+            FROM BundleDetalles bd
+            INNER JOIN Productos p ON bd.ProductoID = p.ProductoID
+            INNER JOIN Inventarios i ON p.ProductoID = i.ProductoID
+        """)
+        bundle_productos = cursor.fetchall()
+
+        for row in bundle_productos:
+            bundle_id = row[0]
+            if bundle_id in bundles_dict:
+                precio_unitario = float(row[4])  # Convertir a float
+                cantidad = row[3]
+                bundles_dict[bundle_id]['Productos'].append({
+                    'ProductoID': row[1],
+                    'NombreProducto': row[2],
+                    'Cantidad': cantidad,
+                    'PrecioUnitario': precio_unitario
+                })
+                # Actualizar el precio total del bundle
+                bundles_dict[bundle_id]['PrecioTotalBundle'] += cantidad * precio_unitario
 
         return {
-            "productos": productos_list,
-            "bundles": bundles_list
+            'productos': productos_list,
+            'bundles': list(bundles_dict.values())
         }
-
-    except pyodbc.Error as e:
-        raise HTTPException(status_code=500, detail=f"Error executing query: {str(e)}")
+    
     finally:
         cursor.close()
         conn.close()
-
-
-
-
+        
 def fetch_categories() -> List[Dict]:
     conn = get_db_connection()
     cursor = conn.cursor()
