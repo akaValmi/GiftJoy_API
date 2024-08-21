@@ -177,20 +177,24 @@ def fetch_products_and_bundles(
         # Obtener los detalles de los productos en los bundles y calcular el precio total
         cursor.execute(
             """
-    SELECT
-        bd.BundleID,
-        p.ProductoID,
-        p.Nombre AS NombreProducto,
-        bd.Cantidad,
-        i.Precio,
-        pc.ColorID,
-        c.Nombre AS NombreColor,
-        pc.Img AS ImgColor
-    FROM BundleDetalles bd
-    INNER JOIN Productos p ON bd.ProductoID = p.ProductoID
-    INNER JOIN Inventarios i ON p.ProductoID = i.ProductoID
-    LEFT JOIN ProductoColores pc ON p.ProductoID = pc.ProductoID
-    LEFT JOIN Colores c ON pc.ColorID = c.ColorID
+SELECT
+    bd.BundleID,
+    p.ProductoID,
+    p.Nombre AS NombreProducto,
+    bd.Cantidad,
+    i.Precio,
+    pc.ColorID,
+    c.Nombre AS NombreColor,
+    pc.Img AS ImgColor,
+    pt.TallaID,
+    t.Nombre AS NombreTalla
+FROM BundleDetalles bd
+INNER JOIN Productos p ON bd.ProductoID = p.ProductoID
+INNER JOIN Inventarios i ON p.ProductoID = i.ProductoID
+LEFT JOIN ProductoColores pc ON p.ProductoID = pc.ProductoID
+LEFT JOIN Colores c ON pc.ColorID = c.ColorID
+LEFT JOIN ProductoTallas pt ON p.ProductoID = pt.ProductoID
+LEFT JOIN Tallas t ON pt.TallaID = t.TallaID;
 """
         )
         bundle_productos = cursor.fetchall()
@@ -206,6 +210,8 @@ def fetch_products_and_bundles(
                         container_client.get_blob_client(row[7]).url if row[7] else None
                     ),
                 }
+                talla = {"TallaID": row[8], "NombreTalla": row[9]}
+
                 if not any(
                     p["ProductoID"] == producto_id
                     for p in bundles_dict[BundleID]["Productos"]
@@ -217,6 +223,7 @@ def fetch_products_and_bundles(
                             "Cantidad": row[3],
                             "PrecioUnitario": float(row[4]),
                             "Colores": [color],
+                            "Tallas": [talla] if talla["NombreTalla"] else [],
                         }
                     )
                 else:
@@ -225,6 +232,16 @@ def fetch_products_and_bundles(
                         if producto["ProductoID"] == producto_id:
                             if color not in producto["Colores"]:
                                 producto["Colores"].append(color)
+                            if talla not in producto["Tallas"]:
+                                producto["Tallas"].append(talla)
+
+                            # Elimina productos que no tienen colores ni tallas
+        for bundle in bundles_dict.values():
+            for producto in bundle["Productos"]:
+                if not producto["Colores"]:
+                    del producto["Colores"]
+                if not producto["Tallas"]:
+                    del producto["Tallas"]
 
         # Obtener los colores asociados a cada bundle
         cursor.execute(
