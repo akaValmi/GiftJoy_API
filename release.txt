@@ -1,0 +1,11 @@
+docker buildx build --platform linux/amd64 -t api-giftjoy-dev:latest . --load
+docker run -d -p 8000:8000 --name my-fastapi-container --env-file .env api-giftjoy-dev:latest
+
+az login
+az acr login --name acrgiftjoydev
+
+docker tag api-giftjoy-dev:latest acrgiftjoydev.azurecr.io/api-giftjoy-dev:latest
+docker tag api-giftjoy-dev:latest acrgiftjoydev.azurecr.io/api-giftjoy-dev:0.0.10
+
+docker push acrgiftjoydev.azurecr.io/api-giftjoy-dev:latest
+docker push acrgiftjoydev.azurecr.io/api-giftjoy-dev:0.0.10

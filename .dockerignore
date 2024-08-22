@@ -1,0 +1,31 @@
+# Ignorar archivos y directorios que no son necesarios en la imagen Docker
+
+# Directorios de entorno virtual
+venv/
+env/
+*.pyc
+__pycache__/
+
+# Archivos de configuración del editor
+.vscode/
+.idea/
+
+# Archivos de caché y registros
+*.log
+*.cache
+
+# Archivos y directorios del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Directorios de pruebas
+tests/
+*.pytest_cache
+
+
+
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.git
