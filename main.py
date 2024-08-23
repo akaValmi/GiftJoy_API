@@ -1,8 +1,14 @@
-from fastapi import FastAPI, Request, Depends, Query
+from fastapi import FastAPI, Request, Depends, Query, Response
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from controllers.o365 import login_o365, auth_callback_o365
 from controllers.google import login_google, auth_callback_google
+from controllers.checkout import (
+    fetch_all_payment_types,
+    fetch_all_states,
+    fetch_cities_by_states,
+    insertar_factura,
+)
 from controllers.firebase import register_user_firebase, login_user_firebase
 from controllers.products import (
     fetch_products_and_bundles,
@@ -11,19 +17,23 @@ from controllers.products import (
     fetch_brands,
     fetch_colors,
 )
-from utils.security import validate
+from utils.security import validate, validate_func
 from models.UserRegister import UserRegister
 from models.UserLogin import UserLogin
+from models.factura import FacturaRequest
 from typing import Optional
 import os
 from dotenv import load_dotenv
+import random
+import string
+from fastapi.security import OAuth2PasswordBearer
 
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,16 +70,24 @@ async def authcallbackgoogle(request: Request):
     return await auth_callback_google(request)
 
 
-@app.get("/user")
-@validate
-async def user(request: Request):
-    return {"email": request.state.email}
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
-if __name__ == "__main__":
-    import uvicorn
+@app.post("/user/{email}/code")
+@validate_func
+def request_code(email: str, token: str = Depends(oauth2_scheme)):
+    # Lógica para manejar la solicitud
+    return {"message": "Code requested"}
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+@app.post("/register")
+async def register(user: UserRegister):
+    return await register_user_firebase(user)
+
+
+@app.post("/login")
+async def login(user: UserLogin):
+    return await login_user_firebase(user)
 
 
 @app.get("/products")
@@ -102,11 +120,42 @@ async def get_colors():
     return fetch_colors()
 
 
-@app.post("/register")
-async def register(user: UserRegister):
-    return await register_user_firebase(user)
+@app.get("/user")
+@validate
+async def user(request: Request):
+    return {
+        "email": request.state.email,
+        "firstname": request.state.firstname,
+        "secondname": request.state.secondname,
+        "lastname": request.state.lastname,
+        "secondlastname": request.state.secondlastname,
+        "usuario_id": request.state.usuario_id,
+        "tipo_usuario_id": request.state.tipo_usuario_id,
+        "active": request.state.active,
+    }
 
 
-@app.post("/login")
-async def login(user: UserLogin):
-    return await login_user_firebase(user)
+@app.get("/payment/types")
+async def get_payment_types():
+    return await fetch_all_payment_types()
+
+
+@app.get("/states")
+async def get_states():
+    return await fetch_all_states()
+
+
+@app.get("/states/{state_id}/cities")
+async def get_cities(state_id: int):
+    return await fetch_cities_by_states(state_id)
+
+
+@app.post("/factura")
+async def crear_factura(factura_request: FacturaRequest):
+    return await insertar_factura(factura_request)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
