@@ -3,7 +3,7 @@ from typing import List, Optional
 
 
 class Size(BaseModel):
-    TallaID: Optional[str] = None
+    TallaID: Optional[int] = None
     NombreTalla: Optional[str] = None
 
 
@@ -20,6 +20,7 @@ class Producto(BaseModel):
     ItemTypeID: int
     sizeId: Optional[Size] = None
     colorId: Color
+    id_bundle: Optional[int] = None
 
 
 class CartItem(BaseModel):

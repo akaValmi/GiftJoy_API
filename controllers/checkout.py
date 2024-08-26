@@ -78,13 +78,9 @@ async def insertar_factura(factura_request: FacturaRequest):
     conn = None
     cursor = None
     try:
-        conn = (
-            await get_db_connection()
-        )  # Suponiendo que esta función maneja la conexión
+        conn = await get_db_connection()
         cursor = conn.cursor()
-        # Print the address information for debugging
 
-        # Insert or update address
         cursor.execute(
             """
             IF NOT EXISTS (SELECT 1 FROM Direcciones
@@ -176,8 +172,8 @@ async def insertar_factura(factura_request: FacturaRequest):
                 for producto in item.productos:
                     cursor.execute(
                         """
-                        INSERT INTO DetallesFacturas (FacturaID, ItemID, ItemTypeID, ColorID, TallaID, Cantidad, Precio)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO DetallesFacturas (FacturaID, ItemID, ItemTypeID, ColorID, TallaID, Cantidad, Precio, BundlePerteneciente)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             FacturaID,
@@ -187,6 +183,7 @@ async def insertar_factura(factura_request: FacturaRequest):
                             producto.sizeId.TallaID if producto.sizeId else None,
                             producto.quantity,
                             0,  # Precio 0 para productos dentro de bundles
+                            producto.id_bundle,
                         ),
                     )
 
